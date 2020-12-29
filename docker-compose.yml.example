@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+   sl-exceptions:
+     build:
+       context: .
+     container_name: sl-exceptions
+     ports:
+       - "3838:3838"
+     environment:
+       - AS400HOST=         #IP or FQDN of host
+       - AS400LIB=          #Library where EXCEPT table exists. Likely INSCOM + your bank number
+       - AS400USER=         #User with query access to above library
+       - AS400PWD=          #Password for user above
+       - BANKNUM=           #Your bank number.
+       
+
+
