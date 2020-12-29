@@ -186,7 +186,7 @@ all_query_data <- reactive({
                                  CURRENT_TIMESTAMP AS DATA_REFRESH, CUST1, CUST2, OLDACC1, OLDACC2, JHAACC1, JHAACC2, OLDVAL1,
                                  OLDVAL2, JHAVAL1, JHAVAL2, ISSUE1, ISSUE2, ISSUE3, ISSUE4, ISSUE5, ISSUE6, ISSUE7, ISSUE8, PROBLEM1
                           FROM EXCEPT") %>%
-    mutate(DATA_REFRESH = as.POSIXct(DATA_REFRESH, tz = "America/Chicago"))
+    mutate(DATA_REFRESH = as.POSIXct(DATA_REFRESH, tz = Sys.getenv("TZ")))
    dbDisconnect(core)
    return(all_data)
    })
