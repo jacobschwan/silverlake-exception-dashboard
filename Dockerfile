@@ -25,7 +25,7 @@ RUN install2.r --error \
    DT \
    && rm -rf /tmp/downloaded_packages/ /tmp/*.rds
 
-COPY src /app
+COPY app /app
 
 EXPOSE 3838
 

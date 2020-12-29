@@ -1,0 +1,658 @@
+---
+title: "`r paste('Silverlake Bank', Sys.getenv('BANKNUM'), 'Exceptions')`"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(DBI)
+library(flexdashboard)
+library(shiny)
+library(DT)
+library(RJDBC)
+
+datatable2 <- function(x, vars = NULL, opts = NULL, ...) {
+  
+  names_x <- names(x)
+  if (is.null(vars)) stop("'vars' must be specified!")
+  pos <- match(vars, names_x)
+  if (any(map_chr(x[, pos], typeof) == "list"))
+    stop("list columns are not supported in datatable2()")
+  
+  pos <- pos[pos <= ncol(x)] + 1
+  rownames(x) <- NULL
+  if (nrow(x) > 0) x <- cbind(' ' = '&#10133;', x)
+
+  # options
+  opts <- c(
+    opts, 
+    list(
+      columnDefs = list(
+        list(visible = FALSE, targets = c(0, pos)),
+        list(orderable = FALSE, className = 'details-control', targets = 1),
+        list(className = 'dt-left', targets = 1:3),
+        list(className = 'dt-right', targets = 4:ncol(x))
+      )
+  ))
+  
+  datatable(
+    x, 
+    ...,
+    escape = -2,
+    options = opts,
+    callback = JS(.callback2(x = x, pos = c(0, pos)))
+  )
+}
+
+.callback2 <- function(x, pos = NULL) {
+  
+  part1 <- "table.column(1).nodes().to$().css({cursor: 'pointer'});"
+  
+  part2 <- glue::glue("
+                      var format = function(d) {{
+                         text = '<div><table >' +
+                                   '<thead>' +
+                                      '<tr>' +
+                                          '<th></th>' +
+                                          '<th>' + 'Example 1' + '</th>' +
+                                          '<th>' + 'Example 2' + '</th>' +
+                                      '</tr>' +
+                                   '</thead>' +
+                                      '<tr>' +
+                                          '<td>' + 'Customer' + '</td>' +
+                                          '<td>' + d[{pos[2]}] + '</td>' +
+                                          '<td>' + d[{pos[3]}] + '</td>' +
+                                      '</tr>' +
+                                      '<tr>' +
+                                          '<td>' + 'SL Account' + '</td>' +
+                                          '<td>' + d[{pos[4]}] + '</td>' +
+                                          '<td>' + d[{pos[5]}] + '</td>' +
+                                      '</tr>' +
+                                      '<tr>' + 
+                                          '<td>' + 'SL Value' + '</td>' +
+                                          '<td>' + d[{pos[6]}] + '</td>' +
+                                          '<td>' + d[{pos[7]}] + '</td>' +
+                                      '</tr>' +
+                                      '<tr>' +
+                                          '<td>' + 'Old Account' + '</td>' +
+                                          '<td>' + d[{pos[8]}] + '</td>' +
+                                          '<td>' + d[{pos[9]}] + '</td>' +
+                                      '</tr>' +
+                                      '<tr>' + 
+                                          '<td>' + 'Old Value' + '</td>' +
+                                          '<td>' + d[{pos[10]}] + '</td>' +
+                                          '<td>' + d[{pos[11]}] + '</td>' +
+                                      '</tr>' +
+                                      '</table></div>' +
+                                      '<b>' + 'Issue Notes' + '</b>' + 
+                                      '<p>' + d[{pos[12]}] +
+                                              d[{pos[13]}] +
+                                              d[{pos[14]}] +
+                                              d[{pos[15]}] +
+                                              d[{pos[16]}] +
+                                              d[{pos[17]}] +
+                                              d[{pos[18]}] +
+                                              d[{pos[19]}] +
+                                      '</p>' +
+                                      '<b>' + 'Problem Notes from Jack Henry' + '</b>' +
+                                      '<p>' + d[{pos[20]}] + '</p>'
+                         return text;}};")
+  
+  part3 <- 
+  "
+   table.on('click', 'td.details-control', function() {
+    var td = $(this), row = table.row(td.closest('tr'));
+    if (row.child.isShown()) {
+      row.child.hide();
+      td.html('&#10133;');
+    } else {
+      row.child(format(row.data())).show();
+      td.html('&#10134;');
+    }
+  });"
+  
+  paste(part1, part2, part3)
+} 
+
+.child_row_table2 <- function(x, pos = NULL) {
+  
+  names_x <- paste0(names(x), ":")
+  text <- "
+  var format = function(d) {
+    text = '<div><table >' + 
+  "
+
+  for (i in seq_along(pos)) {
+    text <- paste(text, glue::glue(
+        "'<tr>' +
+          '<td>' + '{names_x[pos[i]]}' + '</td>' +
+          '<td>' + d[{pos[i]}] + '</td>' +
+        '</tr>' + " ))
+  }
+
+  paste0(text,
+    "'</table></div>'
+      return text;};"
+  )
+}
+
+get_trip_data <- function() {
+   db <- as.list(Sys.getenv(c("AS400HOST", "AS400LIB", "AS400USER", "AS400PWD"), names = T))
+   
+   con_string <- paste0("jdbc:as400://", db$AS400HOST,"/",db$AS400LIB,";prompt=false;access=read only")
+   
+   core <- DBI::dbConnect(RJDBC::JDBC(driverClass = "com.ibm.as400.access.AS400JDBCDriver",classPath = "jt400.jar"),
+                            con_string,
+                            user = db$AS400USER,
+                            password = db$AS400PWD,
+                            readonly = TRUE)
+   
+   trips <- dbGetQuery(core, "SELECT DISTINCT TRIPNUM FROM EXCEPT") %>% pull(TRIPNUM)
+   
+   ptrips <- dbGetQuery(core, "SELECT DISTINCT PTRIPNUM FROM EXCEPT") %>% pull(PTRIPNUM)
+   
+   dbDisconnect(core)
+   
+   if(ptrips == "" | length(ptrips == 0)) {
+     default <- last(trips)
+   } else {
+     default <- trips[!(trips %in% ptrips)]
+   }
+   
+   list(trips = trips,
+        default = default)
+}
+```
+
+```{r functions}
+all_query_data <- reactive({
+   #invalidateLater(300000)
+   db <- as.list(Sys.getenv(c("AS400HOST", "AS400LIB", "AS400USER", "AS400PWD"), names = T))
+   
+   con_string <- paste0("jdbc:as400://", db$AS400HOST,"/",db$AS400LIB,";prompt=false;access=read only")
+   
+   core <- DBI::dbConnect(RJDBC::JDBC(driverClass = "com.ibm.as400.access.AS400JDBCDriver",classPath = "jt400.jar"),
+                            con_string,
+                            user = db$AS400USER,
+                            password = db$AS400PWD,
+                            readonly = TRUE)
+   all_data <- dbGetQuery(core, "SELECT TRIPNUM, APPPRFX, APPNAME, APPNUM, FDESC1, FDESC2, VERTEAM, PROBLEM, RESOLVED, APPROVED,
+                                 CURRENT_TIMESTAMP AS DATA_REFRESH, CUST1, CUST2, OLDACC1, OLDACC2, JHAACC1, JHAACC2, OLDVAL1,
+                                 OLDVAL2, JHAVAL1, JHAVAL2, ISSUE1, ISSUE2, ISSUE3, ISSUE4, ISSUE5, ISSUE6, ISSUE7, ISSUE8, PROBLEM1
+                          FROM EXCEPT") %>%
+    mutate(DATA_REFRESH = as.POSIXct(DATA_REFRESH, tz = Sys.getenv("TZ")))
+   dbDisconnect(core)
+   return(all_data)
+   })
+
+
+
+all_date_time <- reactive({
+   all_query_data()$DATA_REFRESH[1]
+})
+
+
+current_test <- reactive({
+      all_query_data() %>%
+      filter(TRIPNUM == input$test, APPROVED != "I") %>%
+      unite(col = "DESC", FDESC1, FDESC2, sep = " ") %>%
+      mutate(APPNAME = trimws(APPNAME),
+             APPNUM = as.integer(APPNUM),
+             VERTEAM = trimws(VERTEAM),
+             DESC = trimws(DESC))
+})
+
+cif_dep <- reactive({
+   current_test() %>%
+   filter(APPPRFX %in% c("CD", "CF", "DD", "IR", "SV", "SD"))
+})
+
+ln <- reactive({
+   current_test() %>%
+   filter(APPPRFX %in% c("LN"))
+})
+
+gl <- reactive({
+   current_test() %>%
+   filter(APPPRFX %in% c("AP", "GL"))
+})
+
+open_ex_box <- function(df) {
+   df %>% 
+      filter(RESOLVED != 'R', PROBLEM != 'N',
+             !(APPROVED %in% c("C", "R"))) %>%
+      tally() %>%
+      pull() %>%
+      as.integer() %>%
+      valueBox(color = "red", icon = "fa-exclamation") %>%
+      return()
+}
+
+pending_ex_box <- function(df) {
+   df %>%
+      filter(RESOLVED == 'R' | PROBLEM == 'N',
+             !(APPROVED %in% c("C", "R"))) %>%
+      tally() %>%
+      pull() %>%
+      as.integer() %>%
+      valueBox(color = "orange", icon = "fa-search") %>%
+      return()
+}
+
+resolved_ex_box <- function(df) {
+   df %>%
+      filter(APPROVED %in% c("C", "R")) %>%
+      tally() %>%
+      pull() %>%
+      as.integer() %>%
+      valueBox(color = "green", icon = "fa-check") %>%
+      return()
+}
+
+exception_view <- function(df) {
+  df %>%
+    select(APPNAME, APPNUM, DESC, VERTEAM, P = PROBLEM, R = RESOLVED, A = APPROVED,
+             CUST1, CUST2, OLDACC1, OLDACC2, JHAACC1, JHAACC2, OLDVAL1, OLDVAL2, JHAVAL1, JHAVAL2,
+             ISSUE1, ISSUE2, ISSUE3, ISSUE4, ISSUE5, ISSUE6, ISSUE7, ISSUE8, PROBLEM1) %>%
+      arrange(APPNAME, APPNUM) %>%
+      datatable2(vars = c("CUST1", "CUST2",
+                          "JHAACC1", "JHAACC2",
+                          "JHAVAL1", "JHAVAL2",
+                          "OLDACC1", "OLDACC2",
+                          "OLDVAL1", "OLDVAL2",
+                          "ISSUE1", "ISSUE2", "ISSUE3", "ISSUE4", "ISSUE5", "ISSUE6", "ISSUE7", "ISSUE8",
+                          "PROBLEM1"),
+                 opts = list(
+                   paging = FALSE,
+                   scrollY = '77vh'
+                  )
+                 ) %>%
+      return()
+}
+
+list_open_exceptions <- function(df) {
+   df %>%
+      filter(RESOLVED != 'R', PROBLEM != 'N',
+             !(APPROVED %in% c("C", "R"))) %>%
+      exception_view() %>%
+      return()
+}
+
+list_pending_exceptions <- function(df) {
+   df %>%
+      filter(RESOLVED == 'R' | PROBLEM == 'N', 
+             !(APPROVED %in% c("C", "R"))) %>%
+      exception_view() %>%
+      return()
+}
+
+list_resolved_execptions <- function(df) {
+   df %>%
+      filter(APPROVED %in% c("C", "R")) %>%
+      exception_view() %>%
+      return()
+}
+
+```
+
+Bank Wide
+=======================================================================
+
+Column {data-width=150} 
+-----------------------------------------------------------------------
+
+### Open Exceptions
+
+```{r}
+renderValueBox(open_ex_box(current_test()))
+```
+
+### Pending Validation
+
+```{r}
+renderValueBox(pending_ex_box(current_test()))
+```
+
+### Closed Exceptions
+
+```{r}
+renderValueBox(resolved_ex_box(current_test()))
+```
+
+### Test Number: {data-height=55}
+
+```{r}
+renderText(input$test)
+```
+
+### Last Refresh:
+
+```{r}
+renderText(format(all_date_time(), "%m/%d/%Y %H:%M:%S"))
+```
+
+Column {.tabset data-width=850}
+------------------------------------------------------------------------
+
+### Open
+
+```{r}
+renderDT(list_open_exceptions(current_test()))
+```
+
+### Pending Validation
+
+```{r}
+renderDT(list_pending_exceptions(current_test()))
+```
+
+### Closed
+
+```{r}
+renderDT(list_resolved_execptions(current_test()))
+```
+
+
+CIF/Deposit
+========================================================================
+
+Column {data-width=150} 
+-----------------------------------------------------------------------
+
+### Open Exceptions
+
+```{r}
+renderValueBox(open_ex_box(cif_dep()))
+```
+
+### Pending Validation
+
+```{r}
+renderValueBox(pending_ex_box(cif_dep()))
+```
+
+### Closed Exceptions
+
+```{r}
+renderValueBox(resolved_ex_box(cif_dep()))
+```
+
+### Test Number: {data-height=55}
+
+```{r}
+renderText(input$test)
+```
+
+### Last Refresh:
+
+```{r}
+renderText(format(all_date_time(), "%m/%d/%Y %H:%M:%S"))
+```
+
+Column {.tabset data-width=850}
+------------------------------------------------------------------------
+
+### Open
+
+```{r}
+renderDT(list_open_exceptions(cif_dep()))
+```
+
+### Pending Validation
+
+```{r}
+renderDT(list_pending_exceptions(cif_dep()))
+```
+
+### Closed
+
+```{r}
+renderDT(list_resolved_execptions(cif_dep()))
+```
+
+
+Loans
+========================================================================
+
+Column {data-width=150} 
+-----------------------------------------------------------------------
+
+### Open Exceptions
+
+```{r}
+renderValueBox(open_ex_box(ln()))
+```
+
+### Pending Validation
+
+```{r}
+renderValueBox(pending_ex_box(ln()))
+```
+
+### Closed Exceptions
+
+```{r}
+renderValueBox(resolved_ex_box(ln()))
+```
+
+### Test Number: {data-height=55}
+
+```{r}
+renderText(input$test)
+```
+
+### Last Refresh:
+
+```{r}
+renderText(format(all_date_time(), "%m/%d/%Y %H:%M:%S"))
+```
+
+
+Column {.tabset data-width=850}
+------------------------------------------------------------------------
+
+### Open
+
+```{r}
+renderDT(list_open_exceptions(ln()))
+```
+
+### Pending Validation
+
+```{r}
+renderDT(list_pending_exceptions(ln()))
+```
+
+### Closed
+
+```{r}
+renderDT(list_resolved_execptions(ln()))
+```
+
+
+GL
+=========================================================================
+
+Column {data-width=150} 
+-----------------------------------------------------------------------
+
+### Open Exceptions
+
+```{r}
+renderValueBox(open_ex_box(gl()))
+```
+
+### Pending Validation
+
+```{r}
+renderValueBox(pending_ex_box(gl()))
+```
+
+### Closed Exceptions
+
+```{r}
+renderValueBox(resolved_ex_box(gl()))
+```
+
+### Test Number: {data-height=55}
+
+```{r}
+renderText(input$test)
+```
+
+### Last Refresh:
+
+```{r}
+renderText(format(all_date_time(), "%m/%d/%Y %H:%M:%S"))
+```
+
+
+Column {.tabset data-width=850} 
+------------------------------------------------------------------------
+
+### Open
+
+```{r}
+renderDT(list_open_exceptions(gl()))
+```
+
+### Pending Validation
+
+```{r}
+renderDT(list_pending_exceptions(gl()))
+```
+
+### Closed
+
+```{r}
+renderDT(list_resolved_execptions(gl()))
+```
+
+Lookup Exception
+========================================================================
+
+Column {data-width=150}
+------------------------------------------------------------------------
+
+```{r}
+fillCol(width = 150, flex = c(NA, NA),
+    textInput("appname", "APPNAME:", value = ""),
+    textInput("appnum", "APPNUM:", value = "")
+)
+```
+
+Column {data-width=900}
+-------------------------------------------------------------------------
+
+### Status {data-height=50}
+
+```{r}
+renderValueBox({
+    if(input$appname == "" | input$appnum == "") {
+        return(valueBox(value = ""))
+    }
+    
+    ticket <- current_test() %>%
+      filter(APPNAME == toupper(input$appname), APPNUM == as.numeric(input$appnum)) %>%
+        mutate(STATUS = case_when(PROBLEM == 'N' ~ "Non-Issue",
+                                 APPROVED %in% c("C", "R") ~ "Closed",
+                                 RESOLVED == 'R' ~ "Pending Validation",
+                                 TRUE ~ "Open"),
+               COLOR = case_when(PROBLEM == 'N' ~ "blue",
+                                 APPROVED %in% c("C", "R") ~ "green",
+                                 RESOLVED == 'R' ~ "orange",
+                                 TRUE ~ "red"),
+               ICON = case_when(PROBLEM == 'N' ~ "fa-ban",
+                                 APPROVED %in% c("C", "R") ~ "fa-check",
+                                 RESOLVED == 'R' ~ "fa-search",
+                                 TRUE ~ "fa-exclamation")) %>%
+       select(STATUS, COLOR, ICON)
+    
+    valueBox(value = ticket$STATUS, caption = NULL, color = ticket$COLOR, icon = ticket$ICON, href = NULL)
+})
+```
+
+
+### Summary {data-height=150}
+
+```{r}
+renderTable({
+    if(input$appname == "" | input$appnum == "") {
+        return()
+    }
+    
+    current_test() %>%
+      filter(APPNAME == toupper(input$appname), APPNUM == as.numeric(input$appnum)) %>%
+        select(APPNAME, APPNUM, DESC, VERTEAM, P = PROBLEM, R = RESOLVED, A = APPROVED)
+})
+```
+
+
+### Examples {data-height=300}
+
+```{r}
+renderTable({
+    if(input$appname == "" | input$appnum == "") {
+        return()
+    }
+    
+    current_test() %>%
+      filter(APPNAME == toupper(input$appname), APPNUM == as.numeric(input$appnum)) %>%
+      select(CUST1, CUST2, OLDACC1, OLDACC2, JHAACC1, JHAACC2, OLDVAL1, OLDVAL2, JHAVAL1, JHAVAL2) %>%
+      gather(key = "VARIABLE",value = "VALUE", everything()) %>%
+      mutate(EXAMPLE = case_when(grepl("1$", VARIABLE) ~ "EXAMPLE_1",
+                              grepl("2$", VARIABLE) ~ "EXAMPLE_2"),
+          VARIABLE = gsub("[[:digit:]]$", "", VARIABLE)) %>%
+      spread(EXAMPLE, VALUE)
+})
+```
+
+### Issue Notes {data-height=300}
+
+```{r}
+renderText({
+    if(input$appname == "" | input$appnum == "") {
+        return()
+    }
+    
+    current_test() %>%
+      filter(APPNAME == toupper(input$appname), APPNUM == as.numeric(input$appnum)) %>%
+      select(starts_with("ISSUE")) %>%
+      gather(key = "LINE", value = "ISSUE_NOTES", everything()) %>%
+      pull(ISSUE_NOTES)
+})
+```
+
+
+### Problem Notes from Jack Henry {data-height=300}
+
+```{r}
+renderText({
+    if(input$appname == "" | input$appnum == "") {
+        return()
+    }
+    
+    current_test() %>%
+      filter(APPNAME == toupper(input$appname), APPNUM == as.numeric(input$appnum)) %>%
+      select(starts_with("PROBLEM")) %>%
+      gather(key = "LINE", value = "PROBLEM_NOTES", everything()) %>%
+      pull(PROBLEM_NOTES)
+})
+```
+
+Test Selection
+========================================================================
+
+```{r inputs}
+   selectInput("test",
+      label = "Test Number:",
+      choices = get_trip_data()$trips,
+      selected = get_trip_data()$default,
+      multiple = F)
+```
