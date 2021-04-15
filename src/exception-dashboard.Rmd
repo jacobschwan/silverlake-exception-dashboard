@@ -153,16 +153,16 @@ get_trip_data <- function() {
                             password = db$AS400PWD,
                             readonly = TRUE)
    
-   trips <- dbGetQuery(core, "SELECT DISTINCT TRIPNUM FROM EXCEPT") %>% pull(TRIPNUM)
-   
-   ptrips <- dbGetQuery(core, "SELECT DISTINCT PTRIPNUM FROM EXCEPT") %>% pull(PTRIPNUM)
+   trips <- dbGetQuery(core, "SELECT TRIPNUM, MAX(DATE('20' || SUBSTR(FILEDATE, CHARACTER_LENGTH(FILEDATE)-1, 2) || '-' || RTRIM(SUBSTR(FILEDATE, CHARACTER_LENGTH(FILEDATE)-5, 2)) || '-' || SUBSTR(FILEDATE, CHARACTER_LENGTH(FILEDATE)-3, 2) )) AS FILE_DATE FROM EXCEPT GROUP BY TRIPNUM ORDER BY FILE_DATE DESC") %>% pull(TRIPNUM)
    
    dbDisconnect(core)
    
-   if(ptrips == "" | length(ptrips == 0)) {
-     default <- last(trips)
+   default_env <- Sys.getenv("DEFAULT_TRIP")
+   
+   if(default_env == "") {
+     default <- first(trips)
    } else {
-     default <- trips[!(trips %in% ptrips)]
+     default <- default_env
    }
    
    list(trips = trips,

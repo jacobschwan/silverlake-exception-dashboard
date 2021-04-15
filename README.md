@@ -26,6 +26,7 @@ services:
        - AS400PWD=<password>
        - TZ="America/Chicago"
        - BANKNUM=000
+       - DEFAULT_TRIP=<tripnum>
      restart: unless-stopped
 ```
 ### docker cli
@@ -39,6 +40,7 @@ docker run -d \
    -e AS400PWD=<password> \
    -e TZ="America/Chicago" \
    -e BANKNUM=000 \
+   -e DEFAULT_TRIP=<tripnum> \
    -p 3838:3838 \
    --restart unless-stopped \
    jmschwan/silverlake-exception-dashboard
@@ -56,3 +58,4 @@ The dashboard uses the following environoment variables to connect to your Silve
 | `AS400PWD`  | Password for `AS400USER` |
 | `BANKNUM`   | Optional. Your bank number to be displayed in the dashboard title.|
 | `TZ`        | Timezone as compatible with R. See [timezones](https://stat.ethz.ch/R-manual/R-devel/library/base/html/timezones.html) documentation. |
+| `DEFAULT_TRIP` | Optional. Trip number the dashboard should default to, e.g. T2 |

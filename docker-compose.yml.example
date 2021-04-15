@@ -13,6 +13,7 @@ services:
        - AS400PWD=<password>
        - TZ="America/Chicago"
        - BANKNUM=000
+       - DEFAULT_TRIP=<tripnum>
      restart: unless-stopped
        
 
